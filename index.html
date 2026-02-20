@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="vi">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tiến Lên Miền Nam - Online</title>
+    <link rel="stylesheet" href="style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+</head>
+
+<body>
+    <div id="game-container">
+        <!-- Mode Selection Overlay -->
+        <div id="mode-selection-overlay" class="overlay">
+            <div class="lobby-card">
+                <h2>TIẾN LÊN MIỀN NAM</h2>
+                <div class="mode-buttons">
+                    <button id="btn-mode-offline" class="main-btn">CHƠI VỚI MÁY</button>
+                    <button id="btn-mode-online" class="main-btn secondary">CHƠI ONLINE</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Lobby Overlay -->
+        <div id="lobby-overlay" class="overlay hidden">
+            <div class="lobby-card">
+                <h2>TIẾN LÊN MIỀN NAM</h2>
+                <div class="input-group">
+                    <input type="text" id="player-name-input" placeholder="Nhập tên của bạn...">
+                    <input type="text" id="room-id-input" placeholder="Mã phòng (vd: 1234)">
+                </div>
+                <button id="btn-join-room" class="main-btn">TẠO / THAM GIA PHÒNG</button>
+            </div>
+        </div>
+
+        <!-- Room List Overlay (Professional Lobby) -->
+        <div id="room-list-overlay" class="overlay hidden">
+            <div class="lobby-header">
+                <div class="user-info">
+                    <img src="https://api.dicebear.com/7.x/avataaars/svg?seed=Felix" alt="avatar" class="user-avatar"
+                        id="lobby-user-avatar">
+                    <div class="user-details">
+                        <div class="user-name" id="lobby-user-name">Người chơi</div>
+                        <div class="user-balance">
+                            <span class="coin-icon">💵</span>
+                            <span id="lobby-user-balance">5,000,000</span>
+                        </div>
+                    </div>
+                </div>
+                <button class="settings-btn" id="btn-settings-lobby">
+                    <svg viewBox="0 0 24 24" fill="currentColor">
+                        <path
+                            d="M19.14,12.94c0.04-0.3,0.06-0.61,0.06-0.94c0-0.32-0.02-0.64-0.07-0.94l2.03-1.58c0.18-0.14,0.23-0.41,0.12-0.61 l-1.92-3.32c-0.12-0.22-0.37-0.29-0.59-0.22l-2.39,0.96c-0.5-0.38-1.03-0.7-1.62-0.94L14.4,2.81c-0.04-0.24-0.24-0.41-0.48-0.41 h-3.84c-0.24,0-0.43,0.17-0.47,0.41L9.25,5.35C8.66,5.59,8.12,5.92,7.63,6.29L5.24,5.33c-0.22-0.08-0.47,0-0.59,0.22L2.74,8.87 C2.62,9.08,2.66,9.34,2.85,9.48l2.03,1.58C4.84,11.36,4.81,11.69,4.81,12s0.02,0.64,0.07,0.94l-2.03,1.58 c-0.18,0.14-0.23,0.41-0.12,0.61l1.92,3.32c0.12,0.22,0.37,0.29,0.59,0.22l2.39-0.96c0.5,0.38,1.03,0.7,1.62,0.94l0.36,2.54 c0.05,0.24,0.24,0.41,0.48,0.41h3.84c0.24,0,0.44-0.17,0.47-0.41l0.36-2.54c0.59-0.24,1.13-0.56,1.62-0.94l2.39,0.96 c0.22,0.08,0.47,0,0.59-0.22l1.92-3.32c0.12-0.22,0.07-0.47-0.12-0.61L19.14,12.94z M12,15.6c-1.98,0-3.6-1.62-3.6-3.6 s1.62-3.6,3.6-3.6s3.6,1.62,3.6,3.6S13.98,15.6,12,15.6z" />
+                    </svg>
+                </button>
+            </div>
+
+            <div class="lobby-filters">
+                <button class="filter-tab active" data-filter="all">Tất cả</button>
+                <button class="filter-tab" data-filter="casual">Bình Dân</button>
+                <button class="filter-tab" data-filter="rich">Đại Gia</button>
+                <button class="filter-tab" data-filter="vip">VIP</button>
+            </div>
+
+            <div class="room-list-container">
+                <div class="room-list-title">Danh sách bàn chơi <span id="room-refresh-info">Cập nhật: 2s trước</span>
+                </div>
+                <div id="room-cards" class="room-cards">
+                    <!-- Room cards will be injected here -->
+                    <div class="room-card loading">Đang tải danh sách bàn...</div>
+                </div>
+            </div>
+
+            <div class="lobby-footer">
+                <button class="lobby-btn secondary" id="btn-create-room-ui">
+                    <span class="icon">+</span> Tạo Bàn
+                </button>
+                <button class="lobby-btn primary" id="btn-quick-play">
+                    <span class="icon">⚡</span> CHƠI NGAY
+                </button>
+            </div>
+
+            <div class="floating-actions">
+                <button class="float-btn trophy"><svg viewBox="0 0 24 24" fill="currentColor">
+                        <path
+                            d="M19,5h-2V3H7v2H5C3.9,5,3,5.9,3,7v1c0,2.55,1.92,4.63,4.39,4.94c0.63,1.5,1.98,2.63,3.61,2.96V19H7v2h10v-2h-4v-3.1 c1.63-0.33,2.98-1.46,3.61-2.96C19.08,12.63,21,10.55,21,8V7C21,5.9,20.1,5,19,5z M5,8V7h2v3.82C5.84,10.4,5,9.3,5,8z M19,8 c0,1.3-0.84,2.4-2,2.82V7h2V8z" />
+                    </svg></button>
+                <button class="float-btn chat-lobby"><svg viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M20,2H4C2.9,2,2,2.9,2,4v18l4-4h14c1.1,0,2-0.9,2-2V4C22,2.9,21.1,2,20,2z" />
+                    </svg></button>
+            </div>
+        </div>
+
+        <!-- Waiting Room Overlay -->
+        <div id="waiting-overlay" class="overlay hidden">
+            <div class="lobby-card">
+                <h2>Phòng Chờ</h2>
+                <p>Mã phòng: <span id="display-room-id" style="color: var(--btn-play); font-weight: bold;">1234</span>
+                </p>
+                <div id="player-list" class="player-list">
+                    <!-- Players will be listed here with ready status -->
+                </div>
+                <div class="waiting-actions">
+                    <button class="main-btn" id="btn-ready">SẴN SÀNG</button>
+                    <button class="main-btn hidden" id="btn-start-game">BẮT ĐẦU</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Chat Modal -->
+        <div id="chat-modal" class="modal hidden">
+            <div class="modal-content chat-content">
+                <div class="modal-header">
+                    <h3>Trò chuyện</h3>
+                    <button class="close-btn" id="close-chat">&times;</button>
+                </div>
+                <div id="chat-messages" class="chat-messages"></div>
+                <div class="chat-input-area">
+                    <input type="text" id="chat-input" placeholder="Nhập tin nhắn...">
+                    <button id="btn-send-chat">Gửi</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- History Modal -->
+        <div id="history-modal" class="modal hidden">
+            <div class="modal-content history-content">
+                <div class="modal-header">
+                    <h3>Lịch sử ván đấu</h3>
+                    <button class="close-btn" id="close-history">&times;</button>
+                </div>
+                <div id="history-list" class="history-list">
+                    <div class="empty-history">Chưa có ván đấu nào được ghi lại.</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Result Modal -->
+        <div id="result-modal" class="modal hidden">
+            <div class="modal-content result-content">
+                <h2 id="result-title">KẾT THÚC VÁN</h2>
+                <div id="result-body" class="result-body">
+                    <!-- Winners and losers listed here -->
+                </div>
+                <div class="result-actions">
+                    <button class="main-btn" id="btn-play-again">CHƠI LẠI</button>
+                    <button class="main-btn secondary" id="btn-result-lobby">PHÒNG CHỜ</button>
+                </div>
+            </div>
+        </div>
+        <!-- Top Bar -->
+        <header class="top-bar">
+            <button class="icon-btn" id="btn-back">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M19 12H5M12 19l-7-7 7-7" />
+                </svg>
+            </button>
+            <div class="balance-container">
+                <span class="currency-icon">💵</span>
+                <span id="player-balance">5,250,000</span>
+            </div>
+            <div class="table-info">BÀN VIP - 50K</div>
+            <div class="top-right-actions">
+                <button class="icon-btn" id="btn-surrender" title="Xin thua">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M3 3h18v18H3zM8 12h8" />
+                        <path d="M12 8v8" stroke-opacity="0.5" />
+                    </svg>
+                </button>
+                <button class="icon-btn" id="btn-chat">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                    </svg>
+                    <span id="chat-badge" class="badge hidden">0</span>
+                </button>
+                <button class="icon-btn" id="btn-history" title="Lịch sử đấu">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                </button>
+                <button class="icon-btn" id="btn-settings">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path
+                            d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
+                        <circle cx="12" cy="12" r="3" />
+                    </svg>
+                </button>
+            </div>
+        </header>
+
+        <!-- Game Table -->
+        <main class="table-area">
+            <div class="poker-table">
+                <!-- Opponents -->
+                <div class="player opponent-left" id="p2">
+                    <div class="avatar-wrapper">
+                        <img src="https://api.dicebear.com/7.x/bottts/svg?seed=P2" alt="Avatar">
+                    </div>
+                    <div class="player-info">
+                        <div class="name">Thanh Tùng</div>
+                        <div class="card-count">10 lá</div>
+                    </div>
+                </div>
+
+                <div class="player opponent-top active-turn" id="p3">
+                    <div class="turn-indicator">ĐẾN LƯỢT BẠN</div>
+                    <div class="avatar-wrapper">
+                        <img src="https://api.dicebear.com/7.x/bottts/svg?seed=P3" alt="Avatar">
+                    </div>
+                    <div class="player-info">
+                        <div class="name">Hoàng Anh</div>
+                        <div class="card-count">13 lá</div>
+                    </div>
+                </div>
+
+                <div class="player opponent-right" id="p4">
+                    <div class="avatar-wrapper">
+                        <img src="https://api.dicebear.com/7.x/bottts/svg?seed=P4" alt="Avatar">
+                    </div>
+                    <div class="player-info">
+                        <div class="name">Minh Hiếu</div>
+                        <div class="card-count">1 lá</div>
+                    </div>
+                </div>
+
+                <!-- Center Played Cards -->
+                <div class="played-cards-container">
+                    <div class="turn-status">LƯỢT TRƯỚC: ĐỐI THỦ 1</div>
+                    <div class="played-cards" id="played-cards">
+                        <!-- Example cards -->
+                        <div class="card suit-diamond" data-rank="3"><span>3</span>♦</div>
+                        <div class="card suit-heart" data-rank="4"><span>4</span>♥</div>
+                        <div class="card suit-club" data-rank="5"><span>5</span>♣</div>
+                        <div class="card suit-spade" data-rank="6"><span>6</span>♠</div>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <!-- Player Hand -->
+        <footer class="player-hand-area">
+            <div class="hand-container" id="my-hand">
+                <!-- Sample hand cards -->
+            </div>
+            <div class="me-player">
+                <div class="avatar-wrapper small">
+                    <img src="https://api.dicebear.com/7.x/avataaars/svg?seed=Me" alt="My Avatar">
+                </div>
+                <span class="my-name">Quốc Khánh</span>
+            </div>
+        </footer>
+
+        <!-- Controls -->
+        <section class="game-controls hidden">
+            <button class="control-btn btn-sort">Sắp xếp</button>
+            <button class="control-btn btn-pass">Bỏ lượt</button>
+            <button class="control-btn btn-play">ĐÁNH</button>
+        </section>
+    </div>
+    <script src="script.js"></script>
+</body>
+
+</html>
