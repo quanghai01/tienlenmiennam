@@ -162,17 +162,17 @@ io.on('connection', (socket) => {
     socket.on('passMove', ({ roomId }) => {
         const room = rooms[roomId];
         if (room && room.players[room.currentTurn].id === socket.id && !room.isGameOver) {
+            // In Tien Len, you cannot pass if you are leading the round
+            if (room.lastMove === null) {
+                return;
+            }
+
             room.passedPlayers.add(socket.id);
 
             let nextT = getNextTurn(room);
 
             // If next turn returns to the last player who played, round ends
             if (room.lastPlayerId && nextT === room.players.findIndex(p => p.id === room.lastPlayerId)) {
-                const winner = room.players.find(p => p.id === room.lastPlayerId);
-                io.to(roomId).emit('logEvent', {
-                    player: winner.name,
-                    text: '<span class="event-highlight">Thắng vòng!</span> Bắt đầu vòng mới.'
-                });
                 room.lastMove = null;
                 room.passedPlayers.clear();
                 room.currentTurn = nextT;
@@ -198,7 +198,9 @@ io.on('connection', (socket) => {
         let next = room.currentTurn;
         for (let i = 0; i < room.players.length; i++) {
             next = (next + 1) % room.players.length;
-            if (!room.passedPlayers.has(room.players[next].id)) {
+            const p = room.players[next];
+            // Skip player if they already passed OR if they have no cards left
+            if (!room.passedPlayers.has(p.id) && p.cards.length > 0) {
                 return next;
             }
         }

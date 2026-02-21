@@ -12,6 +12,11 @@ class Game {
         this.myCards = [];
         this.unreadMessages = 0;
         this.matchHistory = [];
+        this.matchCount = 0;
+        this.currentMatchEvents = {
+            quads: false,
+            threeSpadeWin: false
+        };
 
         // Constants
         this.suits = ['spade', 'club', 'diamond', 'heart'];
@@ -60,17 +65,21 @@ class Game {
                 this.updateUI();
             });
             this.socket.on('movePlayed', (data) => {
-                const prevMove = this.lastPlayedMove;
                 this.lastPlayedMove = data.lastMove;
                 this.currentTurn = data.currentTurn;
                 this.players = data.players;
                 this.renderPlayedCards(data.lastMove);
                 this.updateUI();
 
-                // Log online events if someone played
-                if (data.lastMove && (!prevMove || data.lastMove !== prevMove)) {
-                    const player = this.players.find(p => p.id === data.lastPlayerId);
-                    this.logHistory(player ? player.name : 'Người chơi', data.lastMove);
+                if (data.lastMove) {
+                    if (this.getMoveType(data.lastMove) === 'quad') {
+                        this.currentMatchEvents.quads = true;
+                    }
+                    if (data.lastMove.length === 1 && data.lastMove[0].value === 0) {
+                        this.lastPlayerPlayed3Spade = data.lastPlayerId;
+                    } else {
+                        this.lastPlayerPlayed3Spade = null;
+                    }
                 }
             });
 
@@ -82,14 +91,6 @@ class Game {
                 this.players = [];
                 this.updateUI();
                 this.updateWaitingRoom(room.players);
-            });
-
-            this.socket.on('logEvent', (data) => {
-                this.matchHistory.unshift({
-                    time: new Date().toLocaleTimeString(),
-                    player: data.player,
-                    text: data.text
-                });
             });
 
             this.socket.on('newChatMessage', (msg) => {
@@ -131,8 +132,10 @@ class Game {
         });
 
         this.myCards = this.players[0].cards;
-        this.currentTurn = 0;
         this.renderHand(this.myCards);
+        this.currentMatchEvents = { quads: false, threeSpadeWin: false };
+        this.lastPlayerPlayed3Spade = null;
+        this.currentTurn = 0;
         this.updateUI();
     }
 
@@ -199,16 +202,17 @@ class Game {
         // Show controls only during gameplay
         controls.classList.remove('hidden');
 
-        // Disable play/pass if not my turn
+        // Disable play if not my turn, Disable pass if not my turn OR if leading a new round
         const btnPlay = document.querySelector('.btn-play');
         const btnPass = document.querySelector('.btn-pass');
+        const canPass = isMyTurn && this.lastPlayedMove !== null;
 
         btnPlay.disabled = !isMyTurn;
-        btnPass.disabled = !isMyTurn;
+        btnPass.disabled = !canPass;
         btnPlay.style.opacity = isMyTurn ? '1' : '0.5';
-        btnPass.style.opacity = isMyTurn ? '1' : '0.5';
+        btnPass.style.opacity = canPass ? '1' : '0.5';
         btnPlay.style.cursor = isMyTurn ? 'pointer' : 'not-allowed';
-        btnPass.style.cursor = isMyTurn ? 'pointer' : 'not-allowed';
+        btnPass.style.cursor = canPass ? 'pointer' : 'not-allowed';
 
         // Update opponents
         const slots = ['p2', 'p3', 'p4'];
@@ -259,7 +263,6 @@ class Game {
         if (this.isOnline && this.socket) {
             this.socket.emit('playMove', { roomId: this.roomId, cards: cardsToPlay });
         } else {
-            this.passedPlayers.clear();
             this.executeMove(cardsToPlay);
         }
 
@@ -270,6 +273,7 @@ class Game {
     }
 
     executeMove(cards) {
+        if (!this.isOnline) this.passedPlayers.clear();
         const currentPlayer = this.players[this.currentTurn];
         this.logHistory(currentPlayer.name, cards);
 
@@ -297,13 +301,6 @@ class Game {
 
         // If it comes back to the last person who played, reset round
         if (this.lastPlayerId && nextT === this.players.findIndex(p => p.id === this.lastPlayerId)) {
-            const winner = this.players.find(p => p.id === this.lastPlayerId);
-            this.matchHistory.unshift({
-                time: new Date().toLocaleTimeString(),
-                player: winner ? winner.name : 'Hệ thống',
-                text: `<span class="event-highlight">Thắng vòng!</span> Bắt đầu vòng mới.`
-            });
-
             this.lastPlayedMove = null;
             this.passedPlayers.clear();
             this.currentTurn = nextT;
@@ -344,13 +341,28 @@ class Game {
     botPlay() {
         const bot = this.players[this.currentTurn];
         if (!this.lastPlayedMove) {
-            const card = [bot.cards.shift()];
+            // Lead with smallest card (usually single or pair if possible, but keeping it simple)
+            const card = [bot.cards.splice(0, 1)[0]];
             this.executeMove(card);
         } else {
-            const cardIdx = bot.cards.findIndex(c => this.canBeat([c], this.lastPlayedMove));
-            if (cardIdx !== -1 && this.lastPlayedMove.length === 1) {
-                const card = [bot.cards.splice(cardIdx, 1)[0]];
-                this.executeMove(card);
+            // Find ALL possible combinations to beat the move (just simple single/pair detection for now)
+            const moveType = this.getMoveType(this.lastPlayedMove);
+            const moveLen = this.lastPlayedMove.length;
+
+            // Very basic bot logic improvement: match length and beat value
+            let cardsToPlay = [];
+
+            // Try matching length
+            for (let i = 0; i <= bot.cards.length - moveLen; i++) {
+                const subset = bot.cards.slice(i, i + moveLen);
+                if (this.getMoveType(subset) === moveType && this.canBeat(subset, this.lastPlayedMove)) {
+                    cardsToPlay = bot.cards.splice(i, moveLen);
+                    break;
+                }
+            }
+
+            if (cardsToPlay.length > 0) {
+                this.executeMove(cardsToPlay);
             } else {
                 this.passedPlayers.add(bot.id);
                 this.nextTurn();
@@ -444,21 +456,43 @@ class Game {
         modal.classList.remove('hidden');
         this.renderHand([]); // Clear hand UI
         document.querySelector('.game-controls').classList.add('hidden');
+
+        // Record to History
+        this.matchCount++;
+        const now = new Date().toLocaleTimeString();
+        let events = [];
+        if (this.currentMatchEvents.quads) events.push("Bắt tứ quý");
+
+        // Determine if winner finished with 3 of spade
+        const winnerObj = this.players.find(p => p.name === data.winner);
+        if (this.lastPlayerPlayed3Spade && winnerObj && winnerObj.id === this.lastPlayerPlayed3Spade) {
+            events.push("Đút 3 bích");
+        }
+
+        const summary = `Ván ${this.matchCount} - ${data.winner} - ${now}${events.length > 0 ? ' - ' + events.join(' - ') : ''}`;
+        this.matchHistory.unshift({ text: summary });
     }
 
     updateChatBadge() {
         const badge = document.getElementById('chat-badge');
+        const btnChat = document.getElementById('btn-chat');
         if (this.unreadMessages > 0) {
             badge.textContent = this.unreadMessages;
             badge.classList.remove('hidden');
+            btnChat.classList.add('pulse-animation');
         } else {
             badge.classList.add('hidden');
+            btnChat.classList.remove('pulse-animation');
         }
     }
 
     setupChat() {
         const modal = document.getElementById('chat-modal');
-        document.getElementById('btn-chat').onclick = () => {
+        const historyModal = document.getElementById('history-modal');
+
+        document.getElementById('btn-chat').onclick = (e) => {
+            e.stopPropagation();
+            historyModal.classList.add('hidden');
             modal.classList.toggle('hidden');
             if (!modal.classList.contains('hidden')) {
                 this.unreadMessages = 0;
@@ -467,43 +501,46 @@ class Game {
         };
         document.getElementById('close-chat').onclick = () => modal.classList.add('hidden');
         document.getElementById('btn-send-chat').onclick = () => this.sendChat();
+
+        // Prevent closing when clicking inside
+        modal.onclick = (e) => e.stopPropagation();
     }
 
     setupHistory() {
         const modal = document.getElementById('history-modal');
-        document.getElementById('btn-history').onclick = () => {
-            modal.classList.remove('hidden');
-            this.renderHistory();
+        const chatModal = document.getElementById('chat-modal');
+
+        document.getElementById('btn-history').onclick = (e) => {
+            e.stopPropagation();
+            chatModal.classList.add('hidden');
+            modal.classList.toggle('hidden');
+            if (!modal.classList.contains('hidden')) {
+                this.renderHistory();
+            }
         };
         document.getElementById('close-history').onclick = () => modal.classList.add('hidden');
+
+        // Prevent closing when clicking inside
+        modal.onclick = (e) => e.stopPropagation();
+
+        // Close all modals when clicking outside
+        document.addEventListener('click', () => {
+            modal.classList.add('hidden');
+            chatModal.classList.add('hidden');
+        });
     }
 
     logHistory(playerName, cards) {
         if (!cards || cards.length === 0) return;
-
-        let eventText = '';
-        const moveType = this.getMoveType(cards);
-
-        // Check for special events
-        const hasPig = cards.some(c => c.rank === '2');
-        const isQuad = moveType === 'quad';
-
-        if (isQuad) {
-            eventText = `<span class="event-highlight">Bắt Tứ Quý!</span> Đã đánh bộ tứ cực mạnh.`;
-        } else if (hasPig) {
-            eventText = `<span class="event-highlight">Đánh Heo!</span> Chặt đẹp đối thủ.`;
-        } else {
-            eventText = `Đã đánh ${cards.length} lá (${moveType}).`;
+        if (this.getMoveType(cards) === 'quad') {
+            this.currentMatchEvents.quads = true;
         }
-
-        const entry = {
-            time: new Date().toLocaleTimeString(),
-            player: playerName,
-            text: eventText
-        };
-
-        this.matchHistory.unshift(entry); // Newest first
-        if (this.matchHistory.length > 50) this.matchHistory.pop();
+        // Local 3 spade win check for offline
+        if (cards.length === 1 && cards[0].value === 0) {
+            this.lastPlayerPlayed3Spade = this.players[this.currentTurn].id;
+        } else {
+            this.lastPlayerPlayed3Spade = null;
+        }
     }
 
     renderHistory() {
@@ -515,8 +552,7 @@ class Game {
 
         container.innerHTML = this.matchHistory.map(entry => `
             <div class="history-item">
-                <div class="history-time">${entry.time}</div>
-                <div class="history-event"><b>${entry.player}</b>: ${entry.text}</div>
+                <div class="history-event">${entry.text}</div>
             </div>
         `).join('');
     }
